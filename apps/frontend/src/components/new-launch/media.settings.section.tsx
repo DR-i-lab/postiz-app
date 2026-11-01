@@ -130,7 +130,10 @@ export const MediaSettingsSection: FC = () => {
                     <MediaSettingsIcon className="cursor-pointer relative z-[200]" />
                   </div>
                   {hasExtension(media.path, 'mp4') ? (
-                    <VideoFrame url={mediaDirectory.set(media.path)} />
+                    <VideoFrame
+                      url={mediaDirectory.set(media.path)}
+                      poster={media.thumbnail}
+                    />
                   ) : (
                     <img
                       className="w-full h-full object-cover rounded-[4px] mobile:rounded-[8px]"

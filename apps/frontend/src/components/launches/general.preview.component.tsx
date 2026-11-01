@@ -136,6 +136,7 @@ export const GeneralPreviewComponent: FC<{
                       <VideoOrImage
                         autoplay={true}
                         src={mediaDir.set(image.path)}
+                        poster={image.thumbnail}
                       />
                     </a>
                   ))}

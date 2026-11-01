@@ -7,13 +7,27 @@ export const VideoOrImage: FC<{
   isContain?: boolean;
   imageClassName?: string;
   videoClassName?: string;
+  // the video's cover: with one the video doesn't autoplay, so the cover
+  // stays on screen until it is played
+  poster?: string;
+  controls?: boolean;
 }> = (props) => {
-  const { src, autoplay, isContain, imageClassName, videoClassName } = props;
+  const {
+    src,
+    autoplay,
+    isContain,
+    imageClassName,
+    videoClassName,
+    poster,
+    controls,
+  } = props;
   if (hasExtension(src, 'mp4')) {
     return (
       <video
         src={src}
-        autoPlay={autoplay}
+        poster={poster || undefined}
+        autoPlay={autoplay && !poster}
+        controls={!!controls}
         className={clsx('w-full h-full', videoClassName)}
         muted={true}
         loop={true}

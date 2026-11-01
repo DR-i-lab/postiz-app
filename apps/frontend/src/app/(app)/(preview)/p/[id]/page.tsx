@@ -163,6 +163,8 @@ export default async function Auth(
                                 isContain={true}
                                 src={p.path}
                                 autoplay={true}
+                                poster={p.thumbnail}
+                                controls={!!p.thumbnail}
                               />
                             </div>
                           ))}

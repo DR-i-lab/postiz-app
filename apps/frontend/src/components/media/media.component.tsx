@@ -680,7 +680,10 @@ export const MediaBox: FC<{
                         </div>
                       </div>
                       {hasExtension(media.path, 'mp4') ? (
-                        <VideoFrame url={mediaDirectory.set(media.path)} />
+                        <VideoFrame
+                          url={mediaDirectory.set(media.path)}
+                          poster={media.thumbnail}
+                        />
                       ) : (
                         <img
                           width="100%"
@@ -748,6 +751,7 @@ export const MultiMediaComponent: FC<{
   value?: Array<{
     path: string;
     id: string;
+    thumbnail?: string;
   }>;
   text: string;
   name: string;
@@ -929,7 +933,10 @@ export const MultiMediaComponent: FC<{
                         <MediaSettingsIcon className="cursor-pointer relative z-[200]" />
                       </div>
                       {hasExtension(media?.path, 'mp4') ? (
-                        <VideoFrame url={mediaDirectory.set(media?.path)} />
+                        <VideoFrame
+                          url={mediaDirectory.set(media?.path)}
+                          poster={media?.thumbnail}
+                        />
                       ) : (
                         <img
                           className="w-full h-full object-cover rounded-[4px] mobile:rounded-[8px]"
