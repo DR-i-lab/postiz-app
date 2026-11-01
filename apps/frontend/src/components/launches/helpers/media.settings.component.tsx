@@ -322,7 +322,7 @@ export const MediaComponentInner: FC<{
     props.media?.thumbnail || null
   );
   const [thumbnailTimestamp, setThumbnailTimestamp] = useState<number | null>(
-    props.media?.thumbnailTimestamp || null
+    props.media?.thumbnailTimestamp ?? null
   );
 
   useEffect(() => {
