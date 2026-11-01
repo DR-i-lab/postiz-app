@@ -36,6 +36,7 @@ import sharp from 'sharp';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
 import { resolve, sep } from 'path';
+import { readFile } from 'fs/promises';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
 dayjs.extend(utc);
 import * as Sentry from '@sentry/nestjs';
@@ -503,10 +504,15 @@ export class PostsService {
     );
   }
 
-  async updateMedia(id: string, imagesList: any[], convertToJPEG = false) {
+  async updateMedia(
+    id: string,
+    imagesList: any[],
+    convertToJPEG = false,
+    convertThumbnailToJPEG = false
+  ) {
     try {
       let imageUpdateNeeded = false;
-      const getImageList = await Promise.all(
+      const loadImageList = await Promise.all(
         (
           await Promise.all(
             (imagesList || []).map(async (p: any) => {
@@ -604,6 +610,28 @@ export class PostsService {
           })
       );
 
+      const getImageList = !convertThumbnailToJPEG
+        ? loadImageList
+        : await Promise.all(
+            loadImageList.map(async (m) => {
+              if (
+                !m?.thumbnail ||
+                hasExtension(m.thumbnail, 'jpg') ||
+                hasExtension(m.thumbnail, 'jpeg')
+              ) {
+                return m;
+              }
+
+              const thumbnail = await this.thumbnailToJPEG(m.thumbnail);
+              if (thumbnail === m.thumbnail) {
+                return m;
+              }
+
+              imageUpdateNeeded = true;
+              return { ...m, thumbnail };
+            })
+          );
+
       if (imageUpdateNeeded) {
         await this._postRepository.updateImages(
           id,
@@ -616,6 +644,71 @@ export class PostsService {
       return (imagesList || []).filter((m) =>
         this.isAllowedMediaPath(m?.path)
       );
+    }
+  }
+
+  // Instagram takes a reel cover (cover_url) only as a JPEG up to 8 MB in
+  // sRGB, so any other cover is converted before publishing. A cover that
+  // can't be converted is kept as it is, the post is still published.
+  private async thumbnailToJPEG(thumbnail: string): Promise<string> {
+    try {
+      // a cover in local storage is read from disk, not through the public url
+      const localPrefix = process.env.FRONTEND_URL + '/uploads/';
+      const localPath =
+        process.env.STORAGE_PROVIDER === 'local' &&
+        thumbnail.startsWith(localPrefix)
+          ? thumbnail.slice(localPrefix.length - 1)
+          : '';
+
+      if (localPath && !this.isAllowedMediaPath(localPath)) {
+        return thumbnail;
+      }
+
+      const source = localPath
+        ? await readFile(process.env.UPLOAD_DIRECTORY + localPath)
+        : Buffer.from(
+            (
+              await getSsrfSafeAxios().get(thumbnail, {
+                responseType: 'arraybuffer',
+              })
+            ).data
+          );
+
+      const buffer = await sharp(source)
+        .rotate()
+        .resize({
+          width: 1920,
+          height: 1920,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .flatten({ background: '#ffffff' })
+        .toColourspace('srgb')
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      const { path } = await this.storage.uploadFile({
+        buffer,
+        mimetype: 'image/jpeg',
+        size: buffer.length,
+        path: '',
+        fieldname: '',
+        destination: '',
+        stream: new Readable(),
+        filename: '',
+        originalname: '',
+        encoding: '',
+      });
+
+      return path.indexOf('http') === -1
+        ? process.env.FRONTEND_URL +
+            '/' +
+            process.env.NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY +
+            path
+        : path;
+    } catch (err) {
+      console.error('Could not convert the cover to JPEG:', err);
+      return thumbnail;
     }
   }
 
