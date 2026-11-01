@@ -22,6 +22,7 @@ import { createReadStream } from 'fs';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 @Rules(
   [
@@ -435,6 +436,35 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
 
     return {
       maxDurationSeconds: max_video_post_duration_sec,
+    };
+  }
+
+  // TikTok's Content Sharing Guidelines want the post settings built from the
+  // creator's current info: only the privacy levels they can use, and the
+  // interactions they turned off in TikTok shown as off.
+  @DashboardFunction()
+  async creatorInfo(token: string) {
+    const { data } = await (
+      await fetch(
+        'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=UTF-8',
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+    ).json();
+
+    return {
+      privacyLevelOptions: (data?.privacy_level_options || []) as string[],
+      commentDisabled: !!data?.comment_disabled,
+      duetDisabled: !!data?.duet_disabled,
+      stitchDisabled: !!data?.stitch_disabled,
+      maxVideoPostDurationSec: data?.max_video_post_duration_sec as
+        | number
+        | undefined,
     };
   }
 

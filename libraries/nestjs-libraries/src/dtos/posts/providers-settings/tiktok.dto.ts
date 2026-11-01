@@ -77,12 +77,18 @@ export class TikTokDto {
   })
   title: string;
 
-  @IsIn([
-    'PUBLIC_TO_EVERYONE',
-    'MUTUAL_FOLLOW_FRIENDS',
-    'FOLLOWER_OF_CREATOR',
-    'SELF_ONLY',
-  ])
+  // no default value: on a DIRECT_POST the user has to pick it (TikTok's
+  // Content Sharing Guidelines), on UPLOAD TikTok ignores it
+  @ValidateIf((p) => p.content_posting_method !== 'UPLOAD')
+  @IsIn(
+    [
+      'PUBLIC_TO_EVERYONE',
+      'MUTUAL_FOLLOW_FRIENDS',
+      'FOLLOWER_OF_CREATOR',
+      'SELF_ONLY',
+    ],
+    { message: 'Choose who can see this video' }
+  )
   @IsString()
   @JSONSchema({
     description:
@@ -130,6 +136,25 @@ export class TikTokDto {
       'Applied only when content_posting_method=DIRECT_POST. Ignored by TikTok on UPLOAD.',
   })
   brand_content_toggle: boolean;
+
+  // TikTok's Content Sharing Guidelines: once the commercial content
+  // disclosure is on, the post can't go out until it says whom it promotes
+  @ValidateIf(
+    (p) =>
+      p.disclose === true &&
+      p.content_posting_method !== 'UPLOAD' &&
+      !p.brand_organic_toggle &&
+      !p.brand_content_toggle
+  )
+  @IsIn([false], {
+    message:
+      'You need to indicate if your content promotes yourself, a third party, or both',
+  })
+  @JSONSchema({
+    description:
+      'The commercial content disclosure switch. When true, brand_organic_toggle, brand_content_toggle or both must be true.',
+  })
+  disclose?: boolean;
 
   @IsBoolean()
   @IsOptional()
