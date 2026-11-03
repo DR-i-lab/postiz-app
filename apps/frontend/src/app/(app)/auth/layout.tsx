@@ -3,7 +3,6 @@ import { getT } from '@gitroom/react/translation/get.translation.service.backend
 export const dynamic = 'force-dynamic';
 import { ReactNode } from 'react';
 import loadDynamic from 'next/dynamic';
-import { TestimonialComponent } from '@gitroom/frontend/components/auth/testimonial.component';
 import { LogoTextComponent } from '@gitroom/frontend/components/ui/logo-text.component';
 import { MantineWrapper } from '@gitroom/react/helpers/mantine.wrapper';
 import { Toaster } from '@gitroom/react/toaster/toaster';
@@ -25,16 +24,23 @@ export default async function AuthLayout({
           <div className="w-full max-w-[440px] mx-auto justify-center gap-[20px] h-full flex flex-col text-white">
             <LogoTextComponent />
             <div className="flex">{children}</div>
+            <div className="text-[12px] text-white/50">
+              <a
+                href="https://github.com/DR-i-lab/postiz-app"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-white"
+              >
+                {t('source_code', 'Source code')}
+              </a>
+            </div>
           </div>
         </div>
-        <div className="text-[36px] flex-1 pt-[88px] hidden lg:flex flex-col items-center">
-          <div className="text-center">
-            Over <span className="text-[42px] text-[#FC69FF]">20,000+</span>{' '}
-            Entrepreneurs use
-            <br />
-            Postiz To Grow Their Social Presence
+        <div className="flex-1 hidden lg:flex flex-col items-center justify-center px-[40px]">
+          <div className="text-center text-[28px] max-w-[560px] leading-[1.35]">
+            Schedule and publish your company&apos;s social media posts from one
+            dashboard.
           </div>
-          <TestimonialComponent />
         </div>
       </div>
     </MantineWrapper>

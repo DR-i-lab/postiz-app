@@ -155,6 +155,16 @@ export const SettingsPopup: FC<{
               <LogoutComponent />
             </div>
           )}
+          <div className="mt-4 mobile:mt-[8px] text-[12px] text-textItemBlur">
+            <a
+              href="https://github.com/DR-i-lab/postiz-app"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-newTextColor"
+            >
+              {t('source_code', 'Source code')}
+            </a>
+          </div>
         </div>
       </div>
       <div className="bg-newBgColorInner flex-1 min-w-0 flex-col flex p-[20px] mobile:p-[12px] gap-[12px]">

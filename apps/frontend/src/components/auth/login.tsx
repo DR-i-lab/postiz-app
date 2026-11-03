@@ -157,6 +157,26 @@ export function Login() {
                     {t('forgot_password', 'Forgot password')}
                   </Link>
                 </p>
+                <p className="mt-6 text-[12px] text-textColor">
+                  {t('by_signing_in_you_agree_to_our', 'By signing in you agree to our')}
+                  &nbsp;
+                  <a
+                    href="https://www.dr-i.tech/pages/social-publisher-terms"
+                    className="underline hover:font-bold"
+                    rel="nofollow"
+                  >
+                    {t('terms_of_service', 'Terms of Service')}
+                  </a>
+                  &nbsp;
+                  {t('and', 'and')}&nbsp;
+                  <a
+                    href="https://www.dr-i.tech/pages/social-publisher-privacy"
+                    rel="nofollow"
+                    className="underline hover:font-bold"
+                  >
+                    {t('privacy_policy', 'Privacy Policy')}
+                  </a>
+                </p>
               </div>
             </div>
           </div>
