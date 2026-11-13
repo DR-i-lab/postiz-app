@@ -60,6 +60,16 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     return true;
   }
 
+  // (#389) "Unable to fetch video file from URL", error_subcode 1363057:
+  // Facebook gave up downloading the video from our server, nothing was
+  // published (the /videos call that publishes it failed).
+  override isMediaFetchError(body: string): boolean {
+    return (
+      body.indexOf('1363057') > -1 ||
+      body.indexOf('Unable to fetch video file from URL') > -1
+    );
+  }
+
   override handleErrors(
     body: string,
     status: number
@@ -69,6 +79,16 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         value: string;
       }
     | undefined {
+    // Checked first: the loose matches below (e.g. '490') could also hit the
+    // fbtrace_id of this error body.
+    if (this.isMediaFetchError(body)) {
+      return {
+        type: 'bad-body' as const,
+        value:
+          'Facebook could not download the video from the media server, please try again',
+      };
+    }
+
     // Access token validation errors - require re-authentication
     if (body.indexOf('Error validating access token') > -1) {
       return {

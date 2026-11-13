@@ -7,6 +7,7 @@ import {
   sleep,
   defineSignal,
   setHandler,
+  patched,
 } from '@temporalio/workflow';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
@@ -109,6 +110,20 @@ const {
 });
 
 const poke = defineSignal('poke');
+
+// The platform could not download the media from our server (see
+// MediaFetchFailed in social.abstract.ts): it is a `bad_body` failure carrying
+// a `mediaFetch` detail, so workflow versions that don't know it still treat
+// it as terminal. The same file usually downloads fine a few minutes later,
+// once the server is no longer busy uploading other videos, so the main post
+// is published again from scratch after each of these delays.
+const MEDIA_FETCH_RETRY_DELAYS = ['5 minutes', '15 minutes'] as const;
+
+const isMediaFetchFailure = (err: unknown) =>
+  err instanceof ActivityFailure &&
+  err.cause instanceof ApplicationFailure &&
+  err.cause.type === 'bad_body' &&
+  (err.cause.details?.[0] as any)?.mediaFetch === true;
 
 const iterate = Array.from({ length: 5 });
 
@@ -331,12 +346,18 @@ export async function postWorkflowV112({
   // "pending": poll the read-only status check with durable timers until it
   // completes. Errors are fully handled here (never rethrown), otherwise they
   // would bubble to the posting retry loop and re-run the publish.
+  // 'media-fetch' means the platform could not download the media before
+  // anything was published: the caller publishes the post again later.
   const resolvePending = async (
-    pending: PostResponse
-  ): Promise<PostResponse | false> => {
+    pending: PostResponse,
+    canRetryMediaFetch = false
+  ): Promise<PostResponse | false | 'media-fetch'> => {
     let pendingData = pending.pendingData;
     let errorAttempts = 0;
     let heartbeats = false;
+    // once finalizePost ran, part of the post may be live (stories are
+    // published one by one): never publish it again from scratch
+    let finalizeRan = false;
 
     for (let check = 0; check < maxPendingChecks; check++) {
       // only finalizePost heartbeats, so a checkPostStatus failure must never
@@ -356,6 +377,7 @@ export async function postWorkflowV112({
         // polling is done, run the remaining provider mutations
         if (result.status === 'ready') {
           heartbeats = true;
+          finalizeRan = true;
           result = await finalizePost(post.integration, result.pendingData);
         }
 
@@ -375,6 +397,18 @@ export async function postWorkflowV112({
         // a long upload
         errorAttempts = 0;
       } catch (err) {
+        // the status check saw the platform fail to download the media:
+        // nothing is published until finalizePost, so it is safe to publish
+        // the whole post again
+        if (
+          canRetryMediaFetch &&
+          !finalizeRan &&
+          isMediaFetchFailure(err) &&
+          patched('media-fetch-retry')
+        ) {
+          return 'media-fetch';
+        }
+
         const handle = await handleActivityError(err, undefined, heartbeats);
 
         // token refreshed, or finalize never started, check again right away
@@ -421,6 +455,21 @@ export async function postWorkflowV112({
     return false;
   };
 
+  // Runs before the main post is published again after a media download
+  // failure: wait, then make sure nobody deleted, edited or published the post
+  // in the meantime (an edit or a new schedule terminates this workflow, this
+  // also covers anything that only changes the database).
+  let mediaFetchRetries = 0;
+  const waitForMediaFetchRetry = async () => {
+    await sleep(MEDIA_FETCH_RETRY_DELAYS[mediaFetchRetries++]);
+    const current = await getPost(organizationId, postId);
+    return (
+      !!current &&
+      current.state === firstPost.state &&
+      current.releaseId === firstPost.releaseId
+    );
+  };
+
   // iterate over the posts
   for (let i = 0; i < postsList.length; i++) {
     const before = postsResults.length;
@@ -430,7 +479,8 @@ export async function postWorkflowV112({
     let posted = false;
     let updated = false;
     // this is a small trick to repeat an action in case of token refresh
-    for (const _ of iterate) {
+    // (a media download retry gives its attempt back, it has its own budget)
+    for (let attempt = 0; attempt < iterate.length; attempt++) {
       // both publish calls run heartbeating activities, but the timed-out
       // status checks below must never be mistaken for never-started
       let heartbeats = false;
@@ -469,9 +519,12 @@ export async function postWorkflowV112({
         // it here before marking anything, resolvePending handles its own
         // errors so a failed status check can never re-run the publish above
         if (postsResults[i].status === 'pending') {
-          let resolved: PostResponse | false = false;
+          let resolved: PostResponse | false | 'media-fetch' = false;
           try {
-            resolved = await resolvePending(postsResults[i]);
+            resolved = await resolvePending(
+              postsResults[i],
+              i === 0 && mediaFetchRetries < MEDIA_FETCH_RETRY_DELAYS.length
+            );
           } catch (err) {
             // never let a pending-resolution error reach the outer catch, it
             // would retry the post and duplicate it. Best-effort error state,
@@ -483,6 +536,16 @@ export async function postWorkflowV112({
               /**empty**/
             }
             resolved = false;
+          }
+          if (resolved === 'media-fetch') {
+            // nothing went live: drop the pending result and publish again
+            postsResults.splice(i);
+            posted = false;
+            if (!(await waitForMediaFetchRetry())) {
+              return false;
+            }
+            attempt--;
+            continue;
           }
           if (!resolved) {
             return false;
@@ -532,6 +595,21 @@ export async function postWorkflowV112({
           // already marked published, a failed notification shouldn't abort
           // the rest of the flow
           break;
+        }
+
+        // the publish call itself failed because the platform could not
+        // download the media, so nothing was created: publish again later
+        if (
+          i === 0 &&
+          mediaFetchRetries < MEDIA_FETCH_RETRY_DELAYS.length &&
+          isMediaFetchFailure(err) &&
+          patched('media-fetch-retry')
+        ) {
+          if (!(await waitForMediaFetchRetry())) {
+            return false;
+          }
+          attempt--;
+          continue;
         }
 
         const handle = await handleActivityError(err, undefined, heartbeats);

@@ -123,14 +123,34 @@ export class PublishedWithError extends ApplicationFailure {
 }
 
 export class BadBody extends ApplicationFailure {
-  constructor(identifier: string, json: string, body: BodyInit, message = '') {
+  constructor(
+    identifier: string,
+    json: string,
+    body: BodyInit,
+    message = '',
+    extraDetails: Record<string, unknown> = {}
+  ) {
     super(truncateForTemporal(message, MAX_FAILURE_MESSAGE), 'bad_body', true, [
       {
         identifier,
         json: truncateForTemporal(json, MAX_FAILURE_FIELD),
         body: truncateForTemporal(body, MAX_FAILURE_FIELD),
+        ...extraDetails,
       },
     ]);
+  }
+}
+
+// The platform could not download the media from our server (Meta's
+// "Unable to fetch video file from URL", Instagram 2207052 / 2207003): nothing
+// was published, and the same file usually downloads fine a few minutes later.
+// It stays a `bad_body` failure so every workflow version that doesn't know
+// about it keeps treating it as a terminal error; postWorkflowV112 reads the
+// `mediaFetch` detail and publishes again after a few minutes (see
+// MEDIA_FETCH_RETRY_DELAYS there).
+export class MediaFetchFailed extends BadBody {
+  constructor(identifier: string, json: string, body: BodyInit, message = '') {
+    super(identifier, json, body, message, { mediaFetch: true });
   }
 }
 
@@ -168,6 +188,16 @@ export abstract class SocialAbstract {
       }
     | undefined {
     return undefined;
+  }
+
+  /**
+   * True when the platform's error body says it could not download the media
+   * from our server. `fetch` then fails at once with MediaFetchFailed instead
+   * of retrying after 5 seconds: the post workflow publishes again a few
+   * minutes later, when the transfer has a real chance to succeed.
+   */
+  public isMediaFetchError(body: string): boolean {
+    return false;
   }
 
   /**
@@ -615,6 +645,17 @@ export abstract class SocialAbstract {
       json = await request.text();
     } catch (err) {
       json = '{}';
+    }
+
+    // the request failed, so nothing was created on the platform
+    if (this.isMediaFetchError(json)) {
+      throw new MediaFetchFailed(
+        identifier,
+        json,
+        options.body || '{}',
+        this.handleErrors(json, request.status)?.value ||
+          'The platform could not download the media, please try again'
+      );
     }
 
     if (totalRetries > 2) {

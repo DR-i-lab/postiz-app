@@ -12,6 +12,7 @@ import dayjs from 'dayjs';
 import {
   BadBody,
   Disconnect,
+  MediaFetchFailed,
   SocialAbstract,
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
@@ -98,6 +99,13 @@ export class InstagramProvider
       picture: '',
       username: '',
     };
+  }
+
+  // 2207052 "media could not be fetched from this URI" and 2207003 "it takes
+  // too long to download the media": Instagram could not download the file
+  // from our server, a few minutes later the same file usually goes through.
+  public override isMediaFetchError(body: string): boolean {
+    return body.indexOf('2207052') > -1 || body.indexOf('2207003') > -1;
   }
 
   public override handleErrors(
@@ -688,13 +696,36 @@ export class InstagramProvider
           handleError?.value
         );
       }
+      const message =
+        handleError?.value ||
+        (status !== status_code && status) ||
+        'Instagram could not process the media';
+
+      // The container failed while Instagram was downloading or processing
+      // the media and it can't be resumed, but nothing is published until
+      // media_publish: when this happens before finalizePost, the post
+      // workflow creates the containers again a few minutes later. A bare ERROR (no error code in `status`) is retried
+      // too: on 13/11/2026 a 180 MB reel failed that way while the server
+      // was busy uploading other videos, the same file had published before.
+      if (
+        status_code === 'ERROR' &&
+        (this.isMediaFetchError(status || '') ||
+          !status ||
+          status === status_code)
+      ) {
+        throw new MediaFetchFailed(
+          this.identifier,
+          JSON.stringify({ status_code, status }),
+          '{}',
+          message
+        );
+      }
+
       throw new BadBody(
         this.identifier,
         JSON.stringify({ status_code, status }),
         '{}',
-        handleError?.value ||
-          (status !== status_code && status) ||
-          'Instagram could not process the media'
+        message
       );
     }
 
