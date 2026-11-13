@@ -765,6 +765,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   // never hold the whole file in memory: a ranged GET for remote URLs, a ranged
   // read stream for local files.
   private async tiktokChunkStream(path: string, start: number, end: number) {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') === 0) {
       // identity encoding so the store keeps content-length and can answer
       // with the requested range, matching every other media read

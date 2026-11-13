@@ -460,6 +460,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   // Resolves the total byte size of the media without loading it into memory:
   // a HEAD request for remote URLs, statSync for local files.
   private async youtubeMediaSize(path: string): Promise<number> {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') === 0) {
       // the media path is user-influenced, keep the SSRF-safe dispatcher that
       // this.fetch applies to every other outbound request. identity encoding
@@ -490,6 +491,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   // never hold the whole file in memory: a ranged GET for remote URLs, a ranged
   // read stream for local files.
   private async youtubeChunkStream(path: string, start: number, end: number) {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') === 0) {
       // identity encoding so the store keeps content-length and can answer
       // with the requested range: a transformed (compressed) response loses
