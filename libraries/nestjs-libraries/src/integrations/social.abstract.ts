@@ -11,8 +11,9 @@ import {
   getSsrfSafeDispatcher,
 } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import sharp from 'sharp';
-import { createReadStream, readFileSync, statSync } from 'fs';
+import { createReadStream, readFileSync, realpathSync, statSync } from 'fs';
 import { resolve, sep } from 'path';
+import { ownUploadCandidatePath } from '@gitroom/nestjs-libraries/integrations/own.upload.path';
 import { Readable } from 'stream';
 import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
@@ -306,6 +307,7 @@ export abstract class SocialAbstract {
   // hand straight to sharp. Lives here rather than in a helper so it can
   // classify a stall like the ranged reads below do.
   protected async readOrFetch(path: string, retried = false): Promise<Buffer> {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') !== 0) {
       return readFileSync(this.localMediaPath(path));
     }
@@ -347,6 +349,7 @@ export abstract class SocialAbstract {
   // Resolves the total byte size of the media without loading it into memory:
   // a HEAD request for remote URLs, statSync for local files.
   protected async mediaSize(path: string, identifier = ''): Promise<number> {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') === 0) {
       // the media path is user-influenced, keep the SSRF-safe dispatcher that
       // this.fetch applies to every other outbound request. identity encoding
@@ -396,6 +399,40 @@ export abstract class SocialAbstract {
     return filePath;
   }
 
+  // A media url that points at our own /uploads (FRONTEND_URL or one of
+  // UPLOAD_LOCAL_ORIGINS) is read from the worker's disk instead of being
+  // downloaded from the public address, which would loop out through the
+  // reverse proxy and back in. Anything else, and any doubt, returns `path`
+  // untouched so the read stays an HTTP one, exactly as before. The mapped
+  // path always goes through localMediaPath, and its real path (symlinks
+  // resolved) must stay inside UPLOAD_DIRECTORY too.
+  protected ownUploadToLocalPath(path: string): string {
+    const candidate = ownUploadCandidatePath(path);
+    if (!candidate) {
+      return path;
+    }
+
+    try {
+      const filePath = this.localMediaPath(candidate);
+      const base = realpathSync(resolve(process.env.UPLOAD_DIRECTORY!));
+      const real = realpathSync(filePath);
+      if (!real.startsWith(base + sep)) {
+        throw new Error('the file resolves outside the upload directory');
+      }
+      if (!statSync(real).isFile()) {
+        throw new Error('not a file');
+      }
+      return filePath;
+    } catch (err: any) {
+      console.warn(
+        `own upload not read from disk, downloading it: ${stripQuery(path)} (${
+          err?.code || err?.message || err
+        })`
+      );
+      return path;
+    }
+  }
+
   // Reads a single [start, end] byte range into memory. Used by providers whose
   // chunked-upload APIs require a Buffer per segment: only one small chunk is
   // resident at a time, never the whole file.
@@ -406,6 +443,7 @@ export abstract class SocialAbstract {
     identifier = '',
     retried = false
   ): Promise<Buffer> {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') === 0) {
       setHeartbeatDetails(
         `media chunk ${start}-${end} ${stripQuery(path)}`
@@ -478,6 +516,7 @@ export abstract class SocialAbstract {
     path: string,
     identifier = ''
   ): Promise<Readable> {
+    path = this.ownUploadToLocalPath(path);
     if (path.indexOf('http') !== 0) {
       return createReadStream(this.localMediaPath(path, identifier));
     }
