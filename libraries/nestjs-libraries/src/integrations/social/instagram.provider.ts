@@ -104,8 +104,16 @@ export class InstagramProvider
   // 2207052 "media could not be fetched from this URI" and 2207003 "it takes
   // too long to download the media": Instagram could not download the file
   // from our server, a few minutes later the same file usually goes through.
+  // 2207076 is not in Meta's error code list: reported publicly as a
+  // temporary reel upload failure that passes when retried minutes later;
+  // on 12/11/2026 a reel that failed with it published fine when posted
+  // again by hand. Retried only before media_publish, like the others.
   public override isMediaFetchError(body: string): boolean {
-    return body.indexOf('2207052') > -1 || body.indexOf('2207003') > -1;
+    return (
+      body.indexOf('2207052') > -1 ||
+      body.indexOf('2207003') > -1 ||
+      body.indexOf('2207076') > -1
+    );
   }
 
   public override handleErrors(
@@ -200,6 +208,13 @@ export class InstagramProvider
         type: 'bad-body' as const,
         value:
           "Instagram failed to upload the video. If it exceeds Instagram's limits (300MB, 1920px width, 25Mbps bitrate), export a smaller version and try again",
+      };
+    }
+
+    if (body.indexOf('2207076') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value: 'Instagram could not upload the reel, please try again',
       };
     }
 
