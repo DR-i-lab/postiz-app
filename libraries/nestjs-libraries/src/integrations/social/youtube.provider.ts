@@ -456,6 +456,12 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
   // Keep each upload batch well below the 10-minute activity timeout, the
   // workflow calls finalizePost again for the remaining bytes.
   private static readonly YOUTUBE_UPLOAD_BATCH_MS = 4 * 60 * 1000;
+  // YouTube applies a custom thumbnail to a Short only when it is set after
+  // the video finished processing (thumbnails.set reference), so the workflow
+  // keeps checking the processing status first. The workflow waits 20 seconds
+  // between checks: 30 checks give processing about 10 minutes, then the
+  // thumbnail is set anyway, as it was before.
+  private static readonly YOUTUBE_PROCESSING_MAX_CHECKS = 30;
 
   // Resolves the total byte size of the media without loading it into memory:
   // a HEAD request for remote URLs, statSync for local files.
@@ -668,9 +674,20 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       thumbnail: string;
       videoId?: string;
       postDbId?: string;
+      processingChecks?: number;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
+    // the upload already completed (finalizePost recorded the video), only
+    // the thumbnail is left: no need to ask the upload session again
+    if (pendingData.videoId && pendingData.thumbnail) {
+      return this.thumbnailWhenProcessed(
+        accessToken,
+        pendingData,
+        pendingData.videoId
+      );
+    }
+
     let probe: { videoId: string } | { uploadedBytes: number };
     try {
       probe = await this.probeUploadSession(
@@ -690,10 +707,11 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     // the upload completed: the video exists, only the thumbnail may be left
     if ('videoId' in probe) {
       if (pendingData.thumbnail) {
-        return {
-          status: 'ready',
-          pendingData: { ...pendingData, videoId: probe.videoId },
-        };
+        return this.thumbnailWhenProcessed(
+          accessToken,
+          pendingData,
+          probe.videoId
+        );
       }
 
       return {
@@ -708,6 +726,81 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       status: 'ready',
       pendingData: { ...pendingData, uploadedBytes: probe.uploadedBytes },
     };
+  }
+
+  // The video exists and a thumbnail is waiting: hand it to finalizePost
+  // ('ready') only once YouTube finished processing the video, or after
+  // YOUTUBE_PROCESSING_MAX_CHECKS checks. thumbnails.set is idempotent, so
+  // returning 'ready' again after an interrupted finalizePost is safe.
+  private async thumbnailWhenProcessed(
+    accessToken: string,
+    pendingData: { processingChecks?: number },
+    videoId: string
+  ): Promise<PendingCheckResponse> {
+    const processingChecks = (pendingData.processingChecks || 0) + 1;
+    const next = { ...pendingData, videoId, processingChecks };
+
+    if (processingChecks > YoutubeProvider.YOUTUBE_PROCESSING_MAX_CHECKS) {
+      return { status: 'ready', pendingData: next };
+    }
+
+    try {
+      if (await this.youtubeProcessingDone(accessToken, videoId)) {
+        return { status: 'ready', pendingData: next };
+      }
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        throw err;
+      }
+      // anything else is a status read that failed: the video is live either
+      // way, check again (the cap above bounds the wait)
+    }
+
+    return { status: 'pending', pendingData: next };
+  }
+
+  // true once YouTube stopped processing the video, whatever the outcome
+  // (succeeded, failed, terminated): from then on waiting changes nothing.
+  // processingDetails is only visible to the owner, which we are.
+  private async youtubeProcessingDone(
+    accessToken: string,
+    videoId: string
+  ): Promise<boolean> {
+    setHeartbeatDetails('youtube: video processing status');
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=processingDetails,status&id=${encodeURIComponent(
+        videoId
+      )}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    if (response.status === 401) {
+      const text = await response.text().catch(() => '{}');
+      throw new RefreshToken(this.identifier, text, '{}');
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `YouTube processing status check failed with ${response.status}`
+      );
+    }
+
+    const { items } = await response.json();
+    const video = items?.[0];
+
+    // not listed yet right after the upload
+    if (!video) {
+      return false;
+    }
+
+    const processing = video.processingDetails?.processingStatus;
+    if (processing) {
+      return processing !== 'processing';
+    }
+
+    // no processingDetails: fall back to the upload status, 'uploaded' means
+    // the video is still being processed
+    return video.status?.uploadStatus !== 'uploaded';
   }
 
   override async finalizePost(
@@ -829,6 +922,20 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         }
       } else {
         videoId = probe.videoId;
+      }
+
+      // the video exists now: record it and let checkPostStatus wait for
+      // YouTube to finish processing before the thumbnail is set, otherwise a
+      // Short keeps a frame of the video as its cover
+      if (pendingData.thumbnail) {
+        return {
+          status: 'pending',
+          pendingData: {
+            ...pendingData,
+            videoId,
+            uploadedBytes: pendingData.videoSize,
+          },
+        };
       }
     }
 
