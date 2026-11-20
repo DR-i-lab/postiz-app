@@ -63,11 +63,29 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   // (#389) "Unable to fetch video file from URL", error_subcode 1363057:
   // Facebook gave up downloading the video from our server, nothing was
   // published (the /videos call that publishes it failed).
-  override isMediaFetchError(body: string): boolean {
+  private isVideoFetchError(body: string): boolean {
     return (
       body.indexOf('1363057') > -1 ||
       body.indexOf('Unable to fetch video file from URL') > -1
     );
+  }
+
+  // (#324) "Missing or invalid image file", error_subcode 2069019, flagged by
+  // Facebook itself as `is_transient: true`: one of the unpublished /photos
+  // uploads could not get the image. Seen on 2026-11-20 on a 6-photo carousel:
+  // the same six files published fine when posted again four minutes later.
+  // Nothing reached the feed (photos are uploaded with published:false and
+  // /feed is called only after all of them), so publishing again is safe.
+  // Without the transient flag it stays a terminal "Invalid file".
+  private isTransientImageError(body: string): boolean {
+    return (
+      /"error_subcode"\s*:\s*2069019\b/.test(body) &&
+      /"is_transient"\s*:\s*true\b/.test(body)
+    );
+  }
+
+  override isMediaFetchError(body: string): boolean {
+    return this.isVideoFetchError(body) || this.isTransientImageError(body);
   }
 
   override handleErrors(
@@ -81,7 +99,15 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     | undefined {
     // Checked first: the loose matches below (e.g. '490') could also hit the
     // fbtrace_id of this error body.
-    if (this.isMediaFetchError(body)) {
+    if (this.isTransientImageError(body)) {
+      return {
+        type: 'bad-body' as const,
+        value:
+          'Facebook could not read one of the images, please try again',
+      };
+    }
+
+    if (this.isVideoFetchError(body)) {
       return {
         type: 'bad-body' as const,
         value:
