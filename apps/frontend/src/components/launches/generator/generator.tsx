@@ -12,7 +12,6 @@ import { Button } from '@gitroom/react/form/button';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { Textarea } from '@gitroom/react/form/textarea';
 import { Checkbox } from '@gitroom/react/form/checkbox';
-import clsx from 'clsx';
 import {
   CalendarWeekProvider,
   useCalendar,
@@ -280,9 +279,7 @@ const FirstStep: FC = (props) => {
                     )}
                   </option>
                 </Select>
-                <div
-                  className={clsx('flex items-center', loading && 'opacity-50')}
-                >
+                <div className="flex items-center">
                   <Checkbox
                     disabled={loading}
                     {...form.register('isPicture')}
