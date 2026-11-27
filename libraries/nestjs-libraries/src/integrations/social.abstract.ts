@@ -228,7 +228,8 @@ export abstract class SocialAbstract {
   async checkValidity(
     posts: Array<ValidityMedia[]>,
     settings: any,
-    additionalSettings: any[]
+    additionalSettings: any[],
+    integration?: Integration
   ): Promise<string | true> {
     return true;
   }
@@ -301,6 +302,59 @@ export abstract class SocialAbstract {
       await this.readOrFetch(url)
     ).metadata();
     return { width, height };
+  }
+
+  // Duration in seconds of an MP4 video, read from its movie header (the mvhd
+  // box inside moov) with ranged reads, so the video is never loaded as a whole.
+  // Undefined when the file doesn't tell, like a fragmented MP4.
+  protected async getVideoDuration(path: string): Promise<number | undefined> {
+    const url =
+      path?.indexOf('http') === -1
+        ? `${process.env.FRONTEND_URL}/${path}`
+        : path;
+
+    let offset = 0;
+    let end = await this.mediaSize(url);
+    // a real file reaches mvhd within a few boxes
+    for (let box = 0; box < 100 && offset + 8 <= end; box++) {
+      // the box header and, for mvhd, the fields up to the duration
+      const bytes = await this.mediaChunk(
+        url,
+        offset,
+        Math.min(offset + 48, end) - 1
+      );
+      const type = bytes.toString('latin1', 4, 8);
+      // size 1: the real size follows the type; size 0: up to the end
+      const longSize = bytes.readUInt32BE(0) === 1;
+      const header = longSize ? 16 : 8;
+      const size = longSize
+        ? Number(bytes.readBigUInt64BE(8))
+        : bytes.readUInt32BE(0) || end - offset;
+
+      if (type === 'moov') {
+        end = offset + size;
+        offset += header;
+        continue;
+      }
+
+      if (type === 'mvhd') {
+        const long = bytes.readUInt8(header) === 1;
+        const timescale = bytes.readUInt32BE(header + (long ? 20 : 12));
+        const duration = long
+          ? Number(bytes.readBigUInt64BE(header + 24))
+          : bytes.readUInt32BE(header + 16);
+        return timescale && duration && duration !== 0xffffffff
+          ? duration / timescale
+          : undefined;
+      }
+
+      if (size < header) {
+        break;
+      }
+      offset += size;
+    }
+
+    return undefined;
   }
 
   // Reads the whole media into memory: used for images, which the providers

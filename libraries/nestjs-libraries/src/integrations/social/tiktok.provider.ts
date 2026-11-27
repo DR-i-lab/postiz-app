@@ -53,7 +53,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
   }
 
   override async checkValidity(
-    items: Array<ValidityMedia[]>
+    items: Array<ValidityMedia[]>,
+    settings: TikTokDto,
+    additionalSettings: any[],
+    integration?: Integration
   ): Promise<string | true> {
     const [firstItems] = items ?? [];
     if ((firstItems?.length ?? 0) === 0) {
@@ -86,6 +89,50 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         }, TikTok allows a maximum of 1080px on the shorter side`;
       }
     }
+    return this.checkCreatorLimits(firstItems, settings, integration);
+  }
+
+  // TikTok's Content Sharing Guidelines: a direct post stops when the creator
+  // can't post right now, or when the video is longer than they can post.
+  // Checked here and not only in the settings panel, so no client can skip it.
+  private async checkCreatorLimits(
+    media: ValidityMedia[],
+    settings: TikTokDto,
+    integration?: Integration
+  ): Promise<string | true> {
+    // UPLOAD doesn't post: it only sends the media to the TikTok inbox
+    if (!integration?.token || settings?.content_posting_method === 'UPLOAD') {
+      return true;
+    }
+
+    // if TikTok can't be asked now, publishing reports its own error
+    const creator = await this.creatorInfo(integration.token).catch(
+      (): undefined => undefined
+    );
+    if (!creator) {
+      return true;
+    }
+
+    if (!creator.canPost) {
+      return `You can't post to this TikTok account right now (${creator.cannotPostReason}), please try again later`;
+    }
+
+    const maxDuration = creator.maxVideoPostDurationSec;
+    const path = media[0]?.path;
+    if (!maxDuration || !hasExtension(path, 'mp4')) {
+      return true;
+    }
+
+    // a duration we can't read doesn't block the post, TikTok checks it too
+    const duration = await this.getVideoDuration(path).catch(
+      (): undefined => undefined
+    );
+    if (duration && duration > maxDuration) {
+      return `The video is ${Math.ceil(
+        duration
+      )} seconds long, this TikTok account can post videos of up to ${maxDuration} seconds`;
+    }
+
     return true;
   }
 
@@ -439,12 +486,21 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  // creator_info error codes saying the creator can't make another post now
+  private static readonly TIKTOK_CANNOT_POST: Record<string, string> = {
+    spam_risk_too_many_posts: 'the account reached its daily post limit',
+    spam_risk_user_banned_from_posting: 'the account is banned from posting',
+    reached_active_user_cap:
+      'this app reached its daily limit of users posting to TikTok',
+  };
+
   // TikTok's Content Sharing Guidelines want the post settings built from the
-  // creator's current info: only the privacy levels they can use, and the
-  // interactions they turned off in TikTok shown as off.
+  // creator's current info: only the privacy levels they can use, the
+  // interactions they turned off in TikTok shown as off, and no post when they
+  // can't post right now or the video is too long for them.
   @DashboardFunction()
   async creatorInfo(token: string) {
-    const { data } = await (
+    const { data, error } = await (
       await fetch(
         'https://open.tiktokapis.com/v2/post/publish/creator_info/query/',
         {
@@ -453,11 +509,17 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             'Content-Type': 'application/json; charset=UTF-8',
             Authorization: `Bearer ${token}`,
           },
+          signal: AbortSignal.timeout(10000),
         }
       )
     ).json();
 
+    const cannotPostReason =
+      TiktokProvider.TIKTOK_CANNOT_POST[error?.code as string];
+
     return {
+      canPost: !cannotPostReason,
+      cannotPostReason,
       privacyLevelOptions: (data?.privacy_level_options || []) as string[],
       commentDisabled: !!data?.comment_disabled,
       duetDisabled: !!data?.duet_disabled,

@@ -51,6 +51,12 @@ export const withProvider = function <T extends object>(params: {
   dto?: any;
   maximumCharacters?: number | ((settings: any) => number);
   inlineImages?: boolean | ((values: any) => boolean);
+  // shown to the user once a post for this channel is saved to be published
+  publishNotice?: (
+    t: ReturnType<typeof useT>,
+    settings: any,
+    identifier: string
+  ) => string | undefined;
 }) {
   const {
     postComment,
@@ -236,6 +242,12 @@ export const withProvider = function <T extends object>(params: {
         trigger: () => {
           return form.trigger();
         },
+        publishNotice: () =>
+          params.publishNotice?.(
+            t,
+            form.getValues(),
+            selectedIntegration.integration.identifier
+          ),
         // a save that failed on this channel brings it into view, with its
         // settings showing what is wrong
         fix: () => {

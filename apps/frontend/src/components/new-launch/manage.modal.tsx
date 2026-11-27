@@ -791,10 +791,23 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
         if (!addEditSets) {
           mutate();
+          const saved = !existingData.integration
+            ? t('added_successfully', 'Added successfully')
+            : t('updated_successfully', 'Updated successfully');
+          // what the channels going out want the user to know
+          const notices = posts
+            .map((p: any) => p.integration.id)
+            .filter((id: string) =>
+              ['schedule', 'now'].includes(saveTypeOf(id))
+            )
+            .map((id: string) =>
+              integrationById(id)?.ref?.current?.publishNotice?.()
+            )
+            .filter(Boolean);
           toaster.show(
-            !existingData.integration
-              ? t('added_successfully', 'Added successfully')
-              : t('updated_successfully', 'Updated successfully')
+            notices.length
+              ? `${saved}. ${Array.from(new Set(notices)).join(' ')}`
+              : saved
           );
         }
         if (customClose) {

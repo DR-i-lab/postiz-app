@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  FC,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { FC, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   PostComment,
   withProvider,
@@ -22,19 +17,53 @@ import { TiktokPreview } from '@gitroom/frontend/components/new-launch/providers
 import { TikTokMusicSelector } from '@gitroom/frontend/components/new-launch/providers/tiktok/tiktok.music';
 import { TikTokLocationSelector } from '@gitroom/frontend/components/new-launch/providers/tiktok/tiktok.location';
 import { useCustomProviderFunction } from '@gitroom/frontend/components/launches/helpers/use.custom.provider.function';
+import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 
 // what creator_info says about the account, see TiktokProvider.creatorInfo
 type CreatorInfo = {
+  canPost: boolean;
+  cannotPostReason?: string;
   privacyLevelOptions: string[];
   commentDisabled: boolean;
   duetDisabled: boolean;
   stitchDisabled: boolean;
+  maxVideoPostDurationSec?: number;
+};
+
+const TikTokWarning: FC<{
+  className?: string;
+  children: ReactNode;
+}> = ({ className, children }) => {
+  return (
+    <div
+      className={clsx(
+        'bg-tableBorder p-[10px] mb-[18px] rounded-[10px] flex gap-[10px] items-start text-[13px] text-balance',
+        className
+      )}
+    >
+      <div className="shrink-0 mt-[2px]">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M22.201 17.6335L14.0026 3.39569C13.7977 3.04687 13.5052 2.75764 13.1541 2.55668C12.803 2.35572 12.4055 2.25 12.001 2.25C11.5965 2.25 11.199 2.35572 10.8479 2.55668C10.4968 2.75764 10.2043 3.04687 9.99944 3.39569L1.80101 17.6335C1.60388 17.9709 1.5 18.3546 1.5 18.7454C1.5 19.1361 1.60388 19.5199 1.80101 19.8572C2.00325 20.2082 2.29523 20.499 2.64697 20.6998C2.99871 20.9006 3.39755 21.0043 3.80257 21.0001H20.1994C20.6041 21.0039 21.0026 20.9001 21.354 20.6993C21.7054 20.4985 21.997 20.2079 22.1991 19.8572C22.3965 19.52 22.5007 19.1364 22.5011 18.7456C22.5014 18.3549 22.3978 17.9711 22.201 17.6335ZM11.251 9.75006C11.251 9.55115 11.33 9.36038 11.4707 9.21973C11.6113 9.07908 11.8021 9.00006 12.001 9.00006C12.1999 9.00006 12.3907 9.07908 12.5313 9.21973C12.672 9.36038 12.751 9.55115 12.751 9.75006V13.5001C12.751 13.699 12.672 13.8897 12.5313 14.0304C12.3907 14.171 12.1999 14.2501 12.001 14.2501C11.8021 14.2501 11.6113 14.171 11.4707 14.0304C11.33 13.8897 11.251 13.699 11.251 13.5001V9.75006ZM12.001 18.0001C11.7785 18.0001 11.561 17.9341 11.376 17.8105C11.191 17.6868 11.0468 17.5111 10.9616 17.3056C10.8765 17.1 10.8542 16.8738 10.8976 16.6556C10.941 16.4374 11.0482 16.2369 11.2055 16.0796C11.3628 15.9222 11.5633 15.8151 11.7815 15.7717C11.9998 15.7283 12.226 15.7505 12.4315 15.8357C12.6371 15.9208 12.8128 16.065 12.9364 16.25C13.06 16.4351 13.126 16.6526 13.126 16.8751C13.126 17.1734 13.0075 17.4596 12.7965 17.6706C12.5855 17.8815 12.2994 18.0001 12.001 18.0001Z"
+            fill="currentColor"
+          />
+        </svg>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
 };
 
 const TikTokSettings: FC<{
   values?: any;
 }> = (props) => {
-  const { watch, register } = useSettings();
+  const { watch, register, setValue } = useSettings();
   const { value, integration } = useIntegration();
   const t = useT();
 
@@ -60,11 +89,35 @@ const TikTokSettings: FC<{
   }, [integration?.id, isBusiness]);
 
   const isTitle = useMemo(() => {
-    return value?.[0]?.image?.some((p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1);
+    return value?.[0]?.image?.some(
+      (p) => (p?.path?.indexOf?.('mp4') ?? -1) === -1
+    );
   }, [value]);
 
   const hasMedia = (value?.[0]?.image?.length ?? 0) > 0;
   const isVideo = hasMedia && !isTitle;
+
+  // TikTok photo posts have no Duet, Stitch or AI label
+  const isPhoto = !isBusiness && !!isTitle;
+  useEffect(() => {
+    if (isPhoto) {
+      setValue('duet', false);
+      setValue('stitch', false);
+    }
+  }, [isPhoto]);
+
+  // an interaction the creator turned off can't stay ticked from saved settings
+  useEffect(() => {
+    if (creatorInfo?.commentDisabled) {
+      setValue('comment', false);
+    }
+    if (creatorInfo?.duetDisabled) {
+      setValue('duet', false);
+    }
+    if (creatorInfo?.stitchDisabled) {
+      setValue('stitch', false);
+    }
+  }, [creatorInfo]);
 
   const disclose = watch('disclose');
   const autoAddMusic = watch('autoAddMusic');
@@ -79,6 +132,21 @@ const TikTokSettings: FC<{
   // stay mounted and registered: their values must survive the switch, and
   // TikTokDto still requires most of them at save time.
   const directPostOnly = clsx(isUploadMode && 'invisible h-0 overflow-hidden');
+
+  // TikTok's Content Sharing Guidelines: a direct post is stopped when the
+  // creator can't post right now, or the video is longer than they can post.
+  // The server refuses to save it (TiktokProvider.checkValidity), here we say why.
+  const cannotPost = !isUploadMode && creatorInfo?.canPost === false;
+  const mediaDir = useMediaDirectory();
+  const videoPath = isVideo ? value?.[0]?.image?.[0]?.path : undefined;
+  const [video, setVideo] = useState<{ path: string; duration: number }>();
+  const maxDuration = creatorInfo?.maxVideoPostDurationSec;
+  const videoTooLong =
+    !isUploadMode &&
+    !!maxDuration &&
+    !!videoPath &&
+    video?.path === videoPath &&
+    video.duration > maxDuration;
 
   const tiktokRestrictionNotice = useMemo(() => {
     if (!hasMedia || !isVideo) return null;
@@ -151,24 +219,47 @@ const TikTokSettings: FC<{
   return (
     <div className="flex flex-col">
       {/*<CheckTikTokValidity picture={props?.values?.[0]?.image?.[0]?.path} />*/}
+      {cannotPost && (
+        <TikTokWarning className="text-red-600">
+          {t(
+            'tiktok_cannot_post_now',
+            "You can't post to this TikTok account right now. Please try again later."
+          )}
+          {!!creatorInfo?.cannotPostReason && (
+            <>
+              <br />
+              {t('tiktok_cannot_post_reason', 'Reason:')}{' '}
+              {creatorInfo.cannotPostReason}.
+            </>
+          )}
+        </TikTokWarning>
+      )}
+      {videoTooLong && (
+        <TikTokWarning className="text-red-600">
+          {t(
+            'tiktok_video_too_long',
+            'This video is {{duration}} seconds long, but this TikTok account can post videos of up to {{max}} seconds. Upload a shorter video to publish it.',
+            {
+              duration: Math.ceil(video!.duration),
+              max: maxDuration,
+            }
+          )}
+        </TikTokWarning>
+      )}
       {tiktokRestrictionNotice && (
-        <div className="bg-tableBorder p-[10px] mb-[18px] rounded-[10px] flex gap-[10px] items-start text-[13px] text-balance">
-          <div className="shrink-0 mt-[2px]">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M22.201 17.6335L14.0026 3.39569C13.7977 3.04687 13.5052 2.75764 13.1541 2.55668C12.803 2.35572 12.4055 2.25 12.001 2.25C11.5965 2.25 11.199 2.35572 10.8479 2.55668C10.4968 2.75764 10.2043 3.04687 9.99944 3.39569L1.80101 17.6335C1.60388 17.9709 1.5 18.3546 1.5 18.7454C1.5 19.1361 1.60388 19.5199 1.80101 19.8572C2.00325 20.2082 2.29523 20.499 2.64697 20.6998C2.99871 20.9006 3.39755 21.0043 3.80257 21.0001H20.1994C20.6041 21.0039 21.0026 20.9001 21.354 20.6993C21.7054 20.4985 21.997 20.2079 22.1991 19.8572C22.3965 19.52 22.5007 19.1364 22.5011 18.7456C22.5014 18.3549 22.3978 17.9711 22.201 17.6335ZM11.251 9.75006C11.251 9.55115 11.33 9.36038 11.4707 9.21973C11.6113 9.07908 11.8021 9.00006 12.001 9.00006C12.1999 9.00006 12.3907 9.07908 12.5313 9.21973C12.672 9.36038 12.751 9.55115 12.751 9.75006V13.5001C12.751 13.699 12.672 13.8897 12.5313 14.0304C12.3907 14.171 12.1999 14.2501 12.001 14.2501C11.8021 14.2501 11.6113 14.171 11.4707 14.0304C11.33 13.8897 11.251 13.699 11.251 13.5001V9.75006ZM12.001 18.0001C11.7785 18.0001 11.561 17.9341 11.376 17.8105C11.191 17.6868 11.0468 17.5111 10.9616 17.3056C10.8765 17.1 10.8542 16.8738 10.8976 16.6556C10.941 16.4374 11.0482 16.2369 11.2055 16.0796C11.3628 15.9222 11.5633 15.8151 11.7815 15.7717C11.9998 15.7283 12.226 15.7505 12.4315 15.8357C12.6371 15.9208 12.8128 16.065 12.9364 16.25C13.06 16.4351 13.126 16.6526 13.126 16.8751C13.126 17.1734 13.0075 17.4596 12.7965 17.6706C12.5855 17.8815 12.2994 18.0001 12.001 18.0001Z"
-                fill="currentColor"
-              />
-            </svg>
-          </div>
-          <div>{tiktokRestrictionNotice}</div>
-        </div>
+        <TikTokWarning>{tiktokRestrictionNotice}</TikTokWarning>
+      )}
+      {/* only read to know how long the video is */}
+      {!isBusiness && !!videoPath && (
+        <video
+          key={videoPath}
+          className="hidden"
+          preload="metadata"
+          src={mediaDir.set(videoPath)}
+          onLoadedMetadata={(e) =>
+            setVideo({ path: videoPath, duration: e.currentTarget.duration })
+          }
+        />
       )}
       {isTitle && <Input label="Title" {...register('title')} maxLength={89} />}
       <div className={directPostOnly}>
@@ -214,7 +305,12 @@ const TikTokSettings: FC<{
           </option>
         ))}
       </Select>
-      {isUploadMode && <div className="-mt-[23px] mb-[23px] text-red-600">After posting you fill find a notification inside your Inbox about your post (not content studio)</div>}
+      {isUploadMode && (
+        <div className="-mt-[23px] mb-[23px] text-red-600">
+          After posting you fill find a notification inside your Inbox about
+          your post (not content studio)
+        </div>
+      )}
       <div className={clsx('flex flex-col', directPostOnly)}>
         <Select
           label={
@@ -238,7 +334,7 @@ const TikTokSettings: FC<{
           {isBusiness
             ? t(
                 'tiktok_random_music_only_for_photos',
-                'This feature is available only for photos, it adds a random trending track from TikTok\'s commercial music library.'
+                "This feature is available only for photos, it adds a random trending track from TikTok's commercial music library."
               )
             : t(
                 'this_feature_available_only_for_photos',
@@ -269,36 +365,39 @@ const TikTokSettings: FC<{
           </div>
         )}
         <hr className="mb-[15px] border-tableBorder" />
-        <div className="text-[14px] mb-[10px]">
-          {t('tiktok_video_features', 'Video features')}
+        {/* hidden for photos but still registered, TikTokDto requires them */}
+        <div className={clsx(isPhoto && 'invisible h-0 overflow-hidden')}>
+          <div className="text-[14px] mb-[10px]">
+            {t('tiktok_video_features', 'Video features')}
+          </div>
+          <div className="flex gap-[40px]">
+            <Checkbox
+              variant="hollow"
+              label={t('label_duet', 'Allow Duet')}
+              disabled={isUploadMode || !!creatorInfo?.duetDisabled}
+              {...register('duet', {
+                value: false,
+              })}
+            />
+            <Checkbox
+              label={t('label_stitch', 'Allow Stitch')}
+              variant="hollow"
+              disabled={isUploadMode || !!creatorInfo?.stitchDisabled}
+              {...register('stitch', {
+                value: false,
+              })}
+            />
+            <Checkbox
+              label={t('video_made_with_ai', 'Video made with AI')}
+              variant="hollow"
+              disabled={isUploadMode}
+              {...register('video_made_with_ai', {
+                value: false,
+              })}
+            />
+          </div>
+          <hr className="my-[15px] mb-[25px] border-tableBorder" />
         </div>
-        <div className="flex gap-[40px]">
-          <Checkbox
-            variant="hollow"
-            label={t('label_duet', 'Allow Duet')}
-            disabled={isUploadMode || !!creatorInfo?.duetDisabled}
-            {...register('duet', {
-              value: false,
-            })}
-          />
-          <Checkbox
-            label={t('label_stitch', 'Allow Stitch')}
-            variant="hollow"
-            disabled={isUploadMode || !!creatorInfo?.stitchDisabled}
-            {...register('stitch', {
-              value: false,
-            })}
-          />
-          <Checkbox
-            label={t('video_made_with_ai', 'Video made with AI')}
-            variant="hollow"
-            disabled={isUploadMode}
-            {...register('video_made_with_ai', {
-              value: false,
-            })}
-          />
-        </div>
-        <hr className="my-[15px] mb-[25px] border-tableBorder" />
         <div className="flex flex-col gap-[20px]">
           <Checkbox
             label={t('label_comments', 'Allow Comments')}
@@ -310,7 +409,11 @@ const TikTokSettings: FC<{
           />
           <Checkbox
             variant="hollow"
-            label={t('label_disclose_video_content', 'Disclose Video Content')}
+            label={
+              isPhoto
+                ? t('label_disclose_photo_content', 'Disclose Photo Content')
+                : t('label_disclose_video_content', 'Disclose Video Content')
+            }
             disabled={isUploadMode}
             {...register('disclose', {
               value: false,
@@ -334,15 +437,25 @@ const TikTokSettings: FC<{
               </div>
               <div>
                 {brand_content_toggle
-                  ? t(
-                      'your_video_will_be_labeled_paid_partnership',
-                      'Your video will be labeled "Paid partnership".'
-                    )
+                  ? isPhoto
+                    ? t(
+                        'your_photo_will_be_labeled_paid_partnership',
+                        'Your photo will be labeled "Paid partnership".'
+                      )
+                    : t(
+                        'your_video_will_be_labeled_paid_partnership',
+                        'Your video will be labeled "Paid partnership".'
+                      )
                   : brand_organic_toggle
-                  ? t(
-                      'your_video_will_be_labeled_promotional',
-                      'Your video will be labeled "Promotional content".'
-                    )
+                  ? isPhoto
+                    ? t(
+                        'your_photo_will_be_labeled_promotional',
+                        'Your photo will be labeled "Promotional content".'
+                      )
+                    : t(
+                        'your_video_will_be_labeled_promotional',
+                        'Your video will be labeled "Promotional content".'
+                      )
                   : t(
                       'tiktok_disclose_choose_one',
                       'You need to indicate if your content promotes yourself, a third party, or both.'
@@ -350,23 +463,38 @@ const TikTokSettings: FC<{
                 {(brand_organic_toggle || brand_content_toggle) && (
                   <>
                     <br />
-                    {t(
-                      'this_cannot_be_changed_once_posted',
-                      'This cannot be changed once your video is posted.'
-                    )}
+                    {isPhoto
+                      ? t(
+                          'this_cannot_be_changed_once_photo_posted',
+                          'This cannot be changed once your photo is posted.'
+                        )
+                      : t(
+                          'this_cannot_be_changed_once_posted',
+                          'This cannot be changed once your video is posted.'
+                        )}
                   </>
                 )}
               </div>
             </div>
           )}
           <div className="text-[14px] my-[10px] text-balance">
-            {t(
-              'turn_on_to_disclose_video_promotes',
-              'Turn on to disclose that this video promotes goods or services in\n          exchange for something of value. You video could promote yourself, a\n          third party, or both.'
-            )}
+            {isPhoto
+              ? t(
+                  'turn_on_to_disclose_photo_promotes',
+                  'Turn on to disclose that this photo promotes goods or services in exchange for something of value. Your photo could promote yourself, a third party, or both.'
+                )
+              : t(
+                  'turn_on_to_disclose_video_promotes',
+                  'Turn on to disclose that this video promotes goods or services in\n          exchange for something of value. You video could promote yourself, a\n          third party, or both.'
+                )}
           </div>
         </div>
-        <div className={clsx(!disclose && 'invisible h-0 overflow-hidden', 'mt-[20px]')}>
+        <div
+          className={clsx(
+            !disclose && 'invisible h-0 overflow-hidden',
+            'mt-[20px]'
+          )}
+        >
           <Checkbox
             variant="hollow"
             label={t('label_your_brand', 'Your brand')}
@@ -381,10 +509,15 @@ const TikTokSettings: FC<{
               'You are promoting yourself or your own brand.'
             )}
             <br />
-            {t(
-              'this_video_will_be_classified_brand_organic',
-              'This video will be classified as Brand Organic.'
-            )}
+            {isPhoto
+              ? t(
+                  'this_photo_will_be_classified_brand_organic',
+                  'This photo will be classified as Brand Organic.'
+                )
+              : t(
+                  'this_video_will_be_classified_brand_organic',
+                  'This video will be classified as Brand Organic.'
+                )}
           </div>
           <Checkbox
             variant="hollow"
@@ -400,10 +533,15 @@ const TikTokSettings: FC<{
               'You are promoting another brand or a third party.'
             )}
             <br />
-            {t(
-              'this_video_will_be_classified_branded_content',
-              'This video will be classified as Branded Content.'
-            )}
+            {isPhoto
+              ? t(
+                  'this_photo_will_be_classified_branded_content',
+                  'This photo will be classified as Branded Content.'
+                )
+              : t(
+                  'this_video_will_be_classified_branded_content',
+                  'This video will be classified as Branded Content.'
+                )}
             {privacy_level === 'SELF_ONLY' && (
               <>
                 <br />
@@ -412,6 +550,14 @@ const TikTokSettings: FC<{
             )}
           </div>
         </div>
+        {!isBusiness && (
+          <div className="my-[10px] text-[14px] text-balance">
+            {t(
+              'tiktok_processing_time_notice',
+              'After publishing, it may take a few minutes for your content to be processed and appear on your TikTok profile.'
+            )}
+          </div>
+        )}
         {/* TikTok's Content Sharing Guidelines: the declaration is shown on
             every direct post, not only on commercial ones */}
         <div className="my-[10px] text-[14px] text-balance">
@@ -452,4 +598,11 @@ export default withProvider({
   CustomPreviewComponent: TiktokPreview,
   dto: TikTokDto,
   maximumCharacters: 2000,
+  publishNotice: (t, settings, identifier) =>
+    identifier === 'tiktok' && settings.content_posting_method !== 'UPLOAD'
+      ? t(
+          'tiktok_processing_time_toast',
+          'TikTok may take a few minutes to process your post before it appears on your profile.'
+        )
+      : undefined,
 });

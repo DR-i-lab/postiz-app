@@ -190,7 +190,8 @@ export interface SocialProvider
   checkValidity(
     posts: Array<{ path: string; thumbnail?: string }[]>,
     settings: any,
-    additionalSettings: any[]
+    additionalSettings: any[],
+    integration?: Integration
   ): Promise<string | true>;
   checkPostStatus(
     accessToken: string,

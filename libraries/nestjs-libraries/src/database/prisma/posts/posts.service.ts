@@ -1155,7 +1155,8 @@ export class PostsService {
           errors = await provider.checkValidity(
             media,
             settings,
-            additionalSettings
+            additionalSettings,
+            integration
           );
         } catch (err: any) {
           errors = err?.message || 'Invalid media';
